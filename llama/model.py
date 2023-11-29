@@ -93,9 +93,6 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     Returns:
         torch.Tensor: Precomputed frequency tensor with complex exponentials.
 
-    
-        
-
     """
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
     t = torch.arange(end, device=freqs.device)  # type: ignore
@@ -121,6 +118,7 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     Raises:
         AssertionError: If the frequency tensor doesn't match the expected shape.
         AssertionError: If the target tensor 'x' doesn't have the expected number of dimensions.
+
     """
     ndim = x.ndim
     assert 0 <= 1 < ndim
@@ -149,8 +147,6 @@ def apply_rotary_emb(
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
-
-        
 
     """
     xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
@@ -271,8 +267,9 @@ class Attention(nn.Module):
 
         """
         bsz, seqlen, _ = x.shape
-        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)         # (bs, seqlen, n_local_heads*head_dim)
 
+        # (bs, seqlen, n_local_heads*head_dim) -> (bs, seqlen, n_local_heads, head_dim)
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
@@ -282,24 +279,26 @@ class Attention(nn.Module):
         self.cache_k = self.cache_k.to(xq)
         self.cache_v = self.cache_v.to(xq)
 
+        # update cache kv : (bs, cache_len, n_local_heads, head_dim) -> (bs, cache_len + seqlen, n_local_heads, head_dim)
         self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
         self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
 
-        keys = self.cache_k[:bsz, : start_pos + seqlen]
+        # get calc kv
+        keys = self.cache_k[:bsz, : start_pos + seqlen]         # (bs, cache_len + seqlen, n_local_heads, head_dim)
         values = self.cache_v[:bsz, : start_pos + seqlen]
 
         # repeat k/v heads if n_kv_heads < n_heads
-        keys = repeat_kv(keys, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-        values = repeat_kv(values, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
+        keys = repeat_kv(keys, self.n_rep)                      # (bs, cache_len + seqlen, n_local_heads, head_dim)
+        values = repeat_kv(values, self.n_rep)                  # (bs, cache_len + seqlen, n_local_heads, head_dim)
 
-        xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        keys = keys.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
-        values = values.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
+        xq = xq.transpose(1, 2)                                 # (bs, n_local_heads, seqlen, head_dim)
+        keys = keys.transpose(1, 2)                             # (bs, n_local_heads, cache_len + seqlen, head_dim)
+        values = values.transpose(1, 2)                         # (bs, n_local_heads, cache_len + seqlen, head_dim)
         scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
         if mask is not None:
-            scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
+            scores = scores + mask                              # (bs, n_local_heads, seqlen, cache_len + seqlen)
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-        output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
+        output = torch.matmul(scores, values)                   # (bs, n_local_heads, seqlen, head_dim)
         output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
         return self.wo(output)
 
@@ -448,7 +447,7 @@ class Transformer(nn.Module):
         )
 
         self.freqs_cis = precompute_freqs_cis(
-            # Note that self.params.max_seq_len is multiplied by 2 because the token limit for the Llama 2 generation of models is 4096. 
+            # Note that self.params.max_seq_len is multiplied by 2 because the token limit for the Llama 2 generation of models is 4096.
             # Adding this multiplier instead of using 4096 directly allows for dynamism of token lengths while training or fine-tuning.
             self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
         )
@@ -467,7 +466,7 @@ class Transformer(nn.Module):
 
         """
         _bsz, seqlen = tokens.shape
-        h = self.tok_embeddings(tokens)
+        h = self.tok_embeddings(tokens) # (bsz, seqlen) -> (bsz, seqlen, dim)
         self.freqs_cis = self.freqs_cis.to(h.device)
         freqs_cis = self.freqs_cis[start_pos : start_pos + seqlen]
 
@@ -477,12 +476,14 @@ class Transformer(nn.Module):
                 (seqlen, seqlen), float("-inf"), device=tokens.device
             )
 
+            # 保留右上角数据的矩阵
             mask = torch.triu(mask, diagonal=1)
 
             # When performing key-value caching, we compute the attention scores
             # only for the new sequence. Thus, the matrix of scores is of size
             # (seqlen, cache_len + seqlen), and the only masked entries are (i, j) for
             # j > cache_len + i, since row i corresponds to token cache_len + i.
+            #   (seqlen, start_pos) cat (seqlen, seqlen) -> (seqlen, start_pos + seqlen)
             mask = torch.hstack([
                 torch.zeros((seqlen, start_pos), device=tokens.device),
                 mask
