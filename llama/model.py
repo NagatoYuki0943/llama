@@ -21,7 +21,7 @@ class ModelArgs:
     dim: int = 4096
     n_layers: int = 32
     n_heads: int = 32
-    n_kv_heads: Optional[int] = None  # Group-Query Attention group number
+    n_kv_heads: Optional[int] = None  # Group-Query Attention head number, groups = n_heads // n_kv_heads
     vocab_size: int = -1  # defined later by tokenizer
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
     ffn_dim_multiplier: Optional[float] = None
