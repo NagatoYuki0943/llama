@@ -267,7 +267,11 @@ class Attention(nn.Module):
 
         """
         bsz, seqlen, _ = x.shape
-        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)         # (bs, seqlen, n_local_heads*head_dim)
+
+        # xq: (bs, seqlen, n_local_heads*head_dim)
+        # xk: (bs, seqlen, n_local_kv_heads*head_dim)
+        # xv: (bs, seqlen, n_local_kv_heads*head_dim)
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
         # (bs, seqlen, n_local_heads*head_dim) -> (bs, seqlen, n_local_heads, head_dim)
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -279,17 +283,18 @@ class Attention(nn.Module):
         self.cache_k = self.cache_k.to(xq)
         self.cache_v = self.cache_v.to(xq)
 
-        # update cache kv : (bs, cache_len, n_local_heads, head_dim) -> (bs, cache_len + seqlen, n_local_heads, head_dim)
+        # update cache kv : (bs, cache_len, n_local_kv_heads, head_dim) -> (bs, cache_len + seqlen, n_local_kv_heads, head_dim)
         self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
         self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
 
         # get calc kv
-        keys = self.cache_k[:bsz, : start_pos + seqlen]         # (bs, cache_len + seqlen, n_local_heads, head_dim)
+        keys = self.cache_k[:bsz, : start_pos + seqlen]         # (bs, cache_len + seqlen, n_local_kv_heads, head_dim)
         values = self.cache_v[:bsz, : start_pos + seqlen]
 
         # repeat k/v heads if n_kv_heads < n_heads [Group-Query Attention]
-        keys = repeat_kv(keys, self.n_rep)                      # (bs, cache_len + seqlen, n_local_heads, head_dim)
-        values = repeat_kv(values, self.n_rep)                  # (bs, cache_len + seqlen, n_local_heads, head_dim)
+        # (bs, cache_len + seqlen, n_local_kv_heads, head_dim) -> (bs, cache_len + seqlen, n_local_heads, head_dim)
+        keys = repeat_kv(keys, self.n_rep)
+        values = repeat_kv(values, self.n_rep)
 
         xq = xq.transpose(1, 2)                                 # (bs, n_local_heads, seqlen, head_dim)
         keys = keys.transpose(1, 2)                             # (bs, n_local_heads, cache_len + seqlen, head_dim)
