@@ -273,8 +273,9 @@ class Attention(nn.Module):
         # xv: (bs, seqlen, n_local_kv_heads*head_dim)
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-        # (bs, seqlen, n_local_heads*head_dim) -> (bs, seqlen, n_local_heads, head_dim)
-        # (bs, seqlen, n_local_kv_heads*head_dim) -> (bs, seqlen, n_local_kv_heads, head_dim)
+        # xq: (bs, seqlen, n_local_heads*head_dim) -> (bs, seqlen, n_local_heads, head_dim)
+        # xk: (bs, seqlen, n_local_kv_heads*head_dim) -> (bs, seqlen, n_local_kv_heads, head_dim)
+        # xv: (bs, seqlen, n_local_kv_heads*head_dim) -> (bs, seqlen, n_local_kv_heads, head_dim)
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
