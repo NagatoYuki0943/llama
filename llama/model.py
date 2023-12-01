@@ -21,7 +21,7 @@ class ModelArgs:
     dim: int = 4096
     n_layers: int = 32
     n_heads: int = 32
-    n_kv_heads: Optional[int] = None
+    n_kv_heads: Optional[int] = None  # Group-Query Attention group number
     vocab_size: int = -1  # defined later by tokenizer
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
     ffn_dim_multiplier: Optional[float] = None
@@ -287,7 +287,7 @@ class Attention(nn.Module):
         keys = self.cache_k[:bsz, : start_pos + seqlen]         # (bs, cache_len + seqlen, n_local_heads, head_dim)
         values = self.cache_v[:bsz, : start_pos + seqlen]
 
-        # repeat k/v heads if n_kv_heads < n_heads
+        # repeat k/v heads if n_kv_heads < n_heads [Group-Query Attention]
         keys = repeat_kv(keys, self.n_rep)                      # (bs, cache_len + seqlen, n_local_heads, head_dim)
         values = repeat_kv(values, self.n_rep)                  # (bs, cache_len + seqlen, n_local_heads, head_dim)
 
