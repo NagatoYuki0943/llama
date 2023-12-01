@@ -274,6 +274,7 @@ class Attention(nn.Module):
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
         # (bs, seqlen, n_local_heads*head_dim) -> (bs, seqlen, n_local_heads, head_dim)
+        # (bs, seqlen, n_local_kv_heads*head_dim) -> (bs, seqlen, n_local_kv_heads, head_dim)
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
@@ -299,11 +300,16 @@ class Attention(nn.Module):
         xq = xq.transpose(1, 2)                                 # (bs, n_local_heads, seqlen, head_dim)
         keys = keys.transpose(1, 2)                             # (bs, n_local_heads, cache_len + seqlen, head_dim)
         values = values.transpose(1, 2)                         # (bs, n_local_heads, cache_len + seqlen, head_dim)
+
+        # (bs, n_local_heads, seqlen, head_dim) @ (bs, n_local_heads, head_dim, cache_len + seqlen) = (bs, n_local_heads, seqlen, cache_len + seqlen)
         scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
         if mask is not None:
             scores = scores + mask                              # (bs, n_local_heads, seqlen, cache_len + seqlen)
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-        output = torch.matmul(scores, values)                   # (bs, n_local_heads, seqlen, head_dim)
+        
+        # (bs, n_local_heads, seqlen, cache_len + seqlen) @ (bs, n_local_heads, cache_len + seqlen, head_dim) = (bs, n_local_heads, seqlen, head_dim)
+        output = torch.matmul(scores, values)
+        # (bs, n_local_heads, seqlen, head_dim) -> (bs, seqlen, n_local_heads, head_dim) -> (bs, seqlen, n_local_heads*head_dim)
         output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
         return self.wo(output)
 
