@@ -307,7 +307,7 @@ class Attention(nn.Module):
         if mask is not None:
             scores = scores + mask                              # (bs, n_local_heads, seqlen, cache_len + seqlen)
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-        
+
         # (bs, n_local_heads, seqlen, cache_len + seqlen) @ (bs, n_local_heads, cache_len + seqlen, head_dim) = (bs, n_local_heads, seqlen, head_dim)
         output = torch.matmul(scores, values)
         # (bs, n_local_heads, seqlen, head_dim) -> (bs, seqlen, n_local_heads, head_dim) -> (bs, seqlen, n_local_heads*head_dim)
