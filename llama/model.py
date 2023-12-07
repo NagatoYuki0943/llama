@@ -94,10 +94,16 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
         torch.Tensor: Precomputed frequency tensor with complex exponentials.
 
     """
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)  # type: ignore
-    freqs = torch.outer(t, freqs).float()  # type: ignore
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+    # 计算词向量元素两两分组之后，每组元素对应的旋转角度\theta_i
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))  # [end]
+    # 生成 token 序列索引 t = [0, 1,..., seq_len-1]
+    t = torch.arange(end, device=freqs.device)  # type: ignore  [end]
+    # 计算m * \theta
+    freqs = torch.outer(t, freqs).float()  # type: ignore  [end, end]
+    # 计算结果是个复数向量
+    # 假设 freqs = [x, y]
+    # 则 freqs_cis = [cos(x) + sin(x)i, cos(y) + sin(y)i]
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64  [end, end]
     return freqs_cis
 
 
@@ -149,11 +155,13 @@ def apply_rotary_emb(
         Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
 
     """
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+    # view_as_complex: 转为复数域
+    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))  # (bs, seqlen, n_local_heads, head_dim) -> (bs, seqlen, n_local_heads, head_dim/2, 2)
+    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))  # (bs, seqlen, n_local_kv_heads, head_dim) -> (bs, seqlen, n_local_kv_heads, head_dim/2, 2)
     freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    # 应用旋转操作，然后将结果转回实数域
+    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3) # (bs, seqlen, n_local_heads, head_dim/2, 2) -> (bs, seqlen, n_local_heads, head_dim)
+    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3) # (bs, seqlen, n_local_kv_heads, head_dim/2, 2) -> (bs, seqlen, n_local_kv_heads, head_dim)
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
